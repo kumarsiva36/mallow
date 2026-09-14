@@ -1,0 +1,21 @@
+$kind: http-request
+name: http://127.0.0.1:8000/api/v1/merchants/32/usage/ingest
+description: ""
+url: http://127.0.0.1:8000/api/v1/merchants/32/usage/ingest
+method: POST
+body:
+  type: json
+  content: "{\r
+
+    \  \"customer_id\":43,\r
+
+    \  \"units\" : 4500,\r
+
+    \  \"metric\" : \"api_calls\",\r
+
+    \  \"idempotency_key\" : \"req_test_0067\",\r
+
+    \  \"recorded_at\" : \"2026-09-10 14:30:00\"\r
+
+    }"
+order: 1789312574792

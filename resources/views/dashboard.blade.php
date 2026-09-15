@@ -648,6 +648,10 @@
         </div>
 
         <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+            <a href="{{ route('portal.register', ['merchant_id' => $currentMerchant?->id]) }}" class="btn btn-secondary" style="border-radius: 30px; padding: 8px 16px; border: 1px solid rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.12); color: #6ee7b7; font-weight: 600;">
+                <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+                + New Customer Sign Up
+            </a>
             <a href="{{ route('portal.login') }}" class="btn btn-secondary" style="border-radius: 30px; padding: 8px 18px; border: 1px solid rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.15); color: #e0e7ff; font-weight: 600;">
                 <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
                 Customer Portal

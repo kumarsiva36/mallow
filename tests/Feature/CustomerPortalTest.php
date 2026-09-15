@@ -295,4 +295,129 @@ class CustomerPortalTest extends TestCase
 
         $response->assertSessionHasErrors(['current_password']);
     }
+
+    public function test_registration_page_renders_successfully(): void
+    {
+        $response = $this->get('/portal/register');
+
+        $response->assertStatus(200);
+        $response->assertSee('Customer Sign Up');
+        $response->assertSee($this->merchant->name);
+        $response->assertSee($this->starterPlan->name);
+        $response->assertSee('I\'ll Choose a Plan Later', false);
+    }
+
+    public function test_registration_page_redirects_if_already_logged_in(): void
+    {
+        $response = $this->withSession(['customer_id' => $this->customer->id])
+            ->get('/portal/register');
+
+        $response->assertRedirect('/portal');
+    }
+
+    public function test_customer_can_register_without_plan_and_is_logged_in(): void
+    {
+        $response = $this->post('/portal/register', [
+            'merchant_id' => $this->merchant->id,
+            'name' => 'Bob Smith',
+            'email' => 'bob@example.com',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'plan_id' => '',
+        ]);
+
+        $response->assertRedirect('/portal');
+        $this->assertDatabaseHas('customers', [
+            'merchant_id' => $this->merchant->id,
+            'name' => 'Bob Smith',
+            'email' => 'bob@example.com',
+        ]);
+
+        $newCustomer = Customer::where('email', 'bob@example.com')->first();
+        $this->assertNotNull($newCustomer);
+        $this->assertNotNull($newCustomer->external_id);
+        $response->assertSessionHas('customer_id', $newCustomer->id);
+        $this->assertNull($newCustomer->activeSubscription);
+
+        // Verify password works for login
+        $this->post('/portal/logout');
+        $loginRes = $this->post('/portal/login', [
+            'email' => 'bob@example.com',
+            'password' => 'secret123',
+        ]);
+        $loginRes->assertRedirect('/portal');
+        $loginRes->assertSessionHas('customer_id', $newCustomer->id);
+    }
+
+    public function test_customer_can_register_with_initial_plan_and_activates_subscription(): void
+    {
+        $response = $this->post('/portal/register', [
+            'merchant_id' => $this->merchant->id,
+            'name' => 'Charlie Delta Corp',
+            'email' => 'charlie@example.com',
+            'password' => 'securepass99',
+            'password_confirmation' => 'securepass99',
+            'plan_id' => $this->growthPlan->id,
+        ]);
+
+        $response->assertRedirect('/portal');
+        $newCustomer = Customer::where('email', 'charlie@example.com')->first();
+        $this->assertNotNull($newCustomer);
+        $response->assertSessionHas('customer_id', $newCustomer->id);
+
+        // Check active subscription was created
+        $subscription = $newCustomer->activeSubscription;
+        $this->assertNotNull($subscription);
+        $this->assertEquals($this->growthPlan->id, $subscription->plan_id);
+        $this->assertEquals('active', $subscription->status);
+    }
+
+    public function test_customer_registration_validates_required_fields_and_password_confirmation(): void
+    {
+        $response = $this->post('/portal/register', [
+            'merchant_id' => $this->merchant->id,
+            'name' => '',
+            'email' => 'invalid-email',
+            'password' => '123',
+            'password_confirmation' => '456',
+        ]);
+
+        $response->assertSessionHasErrors(['name', 'email', 'password']);
+    }
+
+    public function test_customer_registration_enforces_unique_email_per_merchant(): void
+    {
+        // Try registering with existing customer email under the same merchant
+        $response = $this->post('/portal/register', [
+            'merchant_id' => $this->merchant->id,
+            'name' => 'Duplicate Alice',
+            'email' => 'alice@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ]);
+
+        $response->assertSessionHasErrors(['email']);
+
+        // Registering same email under a DIFFERENT merchant succeeds
+        $otherMerchant = Merchant::create([
+            'name' => 'Beta Cloud Services',
+            'slug' => 'beta-cloud',
+            'currency' => 'EUR',
+        ]);
+
+        $response2 = $this->post('/portal/register', [
+            'merchant_id' => $otherMerchant->id,
+            'name' => 'Alice in Beta Cloud',
+            'email' => 'alice@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+        ]);
+
+        $response2->assertRedirect('/portal');
+        $this->assertDatabaseHas('customers', [
+            'merchant_id' => $otherMerchant->id,
+            'email' => 'alice@example.com',
+        ]);
+    }
 }
+

@@ -13,6 +13,8 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class CustomerPortalController extends Controller
@@ -24,7 +26,7 @@ class CustomerPortalController extends Controller
     ) {}
 
     /**
-     * Show customer portal login page with 1-click demo customer selector.
+     * Show customer portal login page with 1-click demo customer selector and sign-up option.
      */
     public function showLogin(Request $request): View|RedirectResponse
     {
@@ -32,11 +34,95 @@ class CustomerPortalController extends Controller
             return redirect()->route('portal.dashboard');
         }
 
-        $merchants = Merchant::with(['customers.activeSubscription.plan'])->get();
+        $merchants = Merchant::with([
+            'customers.activeSubscription.plan',
+            'plans' => fn($q) => $q->where('is_active', true)->orderBy('base_price'),
+        ])->get();
 
         return view('portal.login', [
             'merchants' => $merchants,
+            'initialTab' => $request->query('tab', 'login'),
+            'selectedMerchantId' => $request->query('merchant_id', $merchants->first()?->id),
+            'selectedPlanId' => $request->query('plan_id'),
         ]);
+    }
+
+    /**
+     * Show customer registration page with tenant selection and plan options.
+     */
+    public function showRegister(Request $request): View|RedirectResponse
+    {
+        if ($request->session()->has('customer_id')) {
+            return redirect()->route('portal.dashboard');
+        }
+
+        $merchants = Merchant::with([
+            'customers.activeSubscription.plan',
+            'plans' => fn($q) => $q->where('is_active', true)->orderBy('base_price'),
+        ])->get();
+
+        $selectedMerchantId = $request->query('merchant_id', $merchants->first()?->id);
+        $selectedPlanId = $request->query('plan_id');
+
+        return view('portal.login', [
+            'merchants' => $merchants,
+            'initialTab' => 'register',
+            'selectedMerchantId' => $selectedMerchantId,
+            'selectedPlanId' => $selectedPlanId,
+        ]);
+    }
+
+    /**
+     * Handle customer registration and initial account setup.
+     */
+    public function register(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'merchant_id' => 'required|integer|exists:merchants,id',
+            'name' => 'required|string|max:255',
+            'email' => [
+                'required',
+                'email',
+                'max:255',
+                Rule::unique('customers')->where(fn ($query) => $query->where('merchant_id', $request->input('merchant_id'))),
+            ],
+            'password' => 'required|string|min:6|confirmed',
+            'plan_id' => 'nullable|integer|exists:plans,id',
+        ], [
+            'email.unique' => 'An account with this email already exists for this provider. Please log in or use another email.',
+            'password.confirmed' => 'The password confirmation does not match.',
+            'password.min' => 'The password must be at least 6 characters.',
+        ]);
+
+        $merchant = Merchant::findOrFail($validated['merchant_id']);
+
+        $customer = Customer::create([
+            'merchant_id' => $merchant->id,
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+            'external_id' => 'cust_' . Str::lower(Str::random(8)),
+        ]);
+
+        $subscribedPlan = null;
+        if (!empty($validated['plan_id'])) {
+            $plan = Plan::where('merchant_id', $merchant->id)
+                ->where('is_active', true)
+                ->find($validated['plan_id']);
+
+            if ($plan) {
+                $this->subscriptionService->subscribe($customer, $plan);
+                $subscribedPlan = $plan;
+            }
+        }
+
+        $request->session()->put('customer_id', $customer->id);
+
+        $welcomeMessage = $subscribedPlan
+            ? "Welcome to {$merchant->name}! Your account has been created and your subscription to {$subscribedPlan->name} is active."
+            : "Welcome to {$merchant->name}! Your customer account has been created successfully. Choose a plan to start using services.";
+
+        return redirect()->route('portal.dashboard')->with('success', $welcomeMessage);
     }
 
     /**

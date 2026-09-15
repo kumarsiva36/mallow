@@ -16,9 +16,13 @@ Route::post('/usage', [UsageController::class, 'ingestDirect'])->middleware('thr
 Route::get('/merchants/{merchant}/dashboard', [MerchantController::class, 'dashboard']);
 
 // Customer Web Portal
+Route::get('/register', fn() => redirect()->route('portal.register'));
+
 Route::prefix('portal')->name('portal.')->group(function () {
     Route::get('/login', [CustomerPortalController::class, 'showLogin'])->name('login');
     Route::post('/login', [CustomerPortalController::class, 'login'])->name('login.post');
+    Route::get('/register', [CustomerPortalController::class, 'showRegister'])->name('register');
+    Route::post('/register', [CustomerPortalController::class, 'register'])->name('register.post');
     Route::post('/logout', [CustomerPortalController::class, 'logout'])->name('logout');
     Route::get('/', [CustomerPortalController::class, 'dashboard'])->name('dashboard');
     Route::post('/purchase', [CustomerPortalController::class, 'purchasePlan'])->name('purchase');

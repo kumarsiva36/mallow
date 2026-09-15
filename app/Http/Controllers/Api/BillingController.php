@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateInvoiceJob;
+use App\Jobs\ProcessCycleBillingJob;
 use App\Models\Invoice;
 use App\Models\Merchant;
 use App\Models\Subscription;
@@ -43,6 +45,16 @@ class BillingController extends Controller
         $advanceCycle = $request->boolean('advance_cycle', true);
         $status = $request->input('status', 'issued');
 
+        if ($request->boolean('queue') || $request->boolean('async')) {
+            GenerateInvoiceJob::dispatch($subscription, $advanceCycle, $status);
+
+            return response()->json([
+                'message' => 'Invoice generation job dispatched to queue',
+                'status' => 'queued',
+                'subscription_id' => $subscription->id,
+            ], 202);
+        }
+
         $invoice = $this->billingService->generateInvoice($subscription, $advanceCycle, $status);
 
         return response()->json([
@@ -57,6 +69,18 @@ class BillingController extends Controller
     public function processCycle(Request $request, Merchant $merchant): JsonResponse
     {
         $asOf = $request->input('as_of') ? Carbon::parse($request->input('as_of')) : Carbon::now();
+        $chunkSize = $request->integer('chunk', 100);
+
+        if ($request->boolean('queue') || $request->boolean('async')) {
+            ProcessCycleBillingJob::dispatch($merchant->id, $asOf->toDateTimeString(), $chunkSize);
+
+            return response()->json([
+                'message' => 'Cycle-end billing job dispatched to queue',
+                'status' => 'queued',
+                'merchant_id' => $merchant->id,
+                'as_of' => $asOf->toDateTimeString(),
+            ], 202);
+        }
 
         $invoices = $this->billingService->processDueSubscriptions($merchant->id, $asOf);
 

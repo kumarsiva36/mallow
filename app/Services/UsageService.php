@@ -291,4 +291,86 @@ class UsageService
             ->orderBy('usage_date')
             ->get();
     }
+
+    /**
+     * Aggregate raw usage events for a customer on a given date (or all dates) into daily_usages.
+     */
+    public function aggregateCustomerDailyUsage(
+        int $customerId,
+        ?string $date = null,
+        ?int $merchantId = null,
+        string $metric = 'api_calls'
+    ): array {
+        if ($merchantId === null) {
+            $customer = \App\Models\Customer::find($customerId);
+            if (!$customer) {
+                return ['processed_dates' => 0, 'total_units' => 0, 'event_count' => 0];
+            }
+            $merchantId = $customer->merchant_id;
+        }
+
+        $query = UsageEvent::where('merchant_id', $merchantId)
+            ->where('customer_id', $customerId)
+            ->where('metric', $metric);
+
+        if ($date !== null) {
+            $dateCarbon = Carbon::parse($date);
+            $query->whereBetween('recorded_at', [
+                $dateCarbon->copy()->startOfDay(),
+                $dateCarbon->copy()->endOfDay(),
+            ]);
+        }
+
+        $driver = DB::connection()->getDriverName();
+        $dateExpr = in_array($driver, ['sqlite'])
+            ? "strftime('%Y-%m-%d', recorded_at)"
+            : "DATE(recorded_at)";
+
+        $dailyStats = $query->selectRaw("
+            {$dateExpr} as usage_date,
+            SUM(units) as total_units,
+            COUNT(*) as event_count,
+            MAX(recorded_at) as last_recorded_at
+        ")
+        ->groupBy(DB::raw($dateExpr))
+        ->get();
+
+        $processedDates = 0;
+        $totalAggUnits = 0;
+        $totalAggEvents = 0;
+
+        foreach ($dailyStats as $stat) {
+            $usageDateStr = (string) $stat->usage_date;
+            $units = (int) $stat->total_units;
+            $eventCount = (int) $stat->event_count;
+            $lastRecorded = $stat->last_recorded_at ? Carbon::parse($stat->last_recorded_at) : Carbon::now();
+
+            DailyUsage::updateOrCreate(
+                [
+                    'merchant_id' => $merchantId,
+                    'customer_id' => $customerId,
+                    'metric' => $metric,
+                    'usage_date' => $usageDateStr,
+                ],
+                [
+                    'total_units' => $units,
+                    'event_count' => $eventCount,
+                    'last_recorded_at' => $lastRecorded,
+                ]
+            );
+
+            $processedDates++;
+            $totalAggUnits += $units;
+            $totalAggEvents += $eventCount;
+        }
+
+        return [
+            'merchant_id' => $merchantId,
+            'customer_id' => $customerId,
+            'metric' => $metric,
+            'processed_dates' => $processedDates,
+            'total_units' => $totalAggUnits,
+            'event_count' => $totalAggEvents,
+        ];
+    }
 }

@@ -100,17 +100,7 @@ Detailed architectural scaling analysis is documented in [docs/SCHEMA_AND_SCALE_
    - On event ingest, an atomic upsert increments `daily_usages` for `[merchant_id, customer_id, metric, usage_date]`.
    - A customer generating 100,000 raw events in a month produces only **30 rows** in `daily_usages`.
    - Cycle-end billing queries scan 30 rows instead of 100,000, reducing query latency from seconds to **< 1.5 ms**.
-4. **MySQL Range Partitioning Strategy**:
-   - `usage_events` is range partitioned monthly by `recorded_at`:
-     ```sql
-     ALTER TABLE usage_events PARTITION BY RANGE (TO_DAYS(recorded_at)) (
-         PARTITION p_2026_08 VALUES LESS THAN (TO_DAYS('2026-09-01')),
-         PARTITION p_2026_09 VALUES LESS THAN (TO_DAYS('2026-10-01')),
-         PARTITION p_future  VALUES LESS THAN MAXVALUE
-     );
-     ```
-   - **Partition Pruning**: Queries for a specific month scan only that month's partition, bypassing 80%+ of disk data.
-   - **Zero-Cost Retention (Instant Drop)**: Expiring old events is an instant metadata operation (`ALTER TABLE usage_events DROP PARTITION p_2026_07;`) that finishes in **< 50 ms** with zero table locks and zero redo log bloat.
+
 
 ---
 
@@ -315,6 +305,7 @@ php artisan serve
 
 - Merchant Admin Console: **`http://127.0.0.1:8000`**
 - Customer Self-Service Portal: **`http://127.0.0.1:8000/portal/login`**
+- Merchant Self-Service Portal: **`http://127.0.0.1:8000/merchant/login`**
 
 ---
 
@@ -385,30 +376,6 @@ php artisan test
   Tests:    32 passed (170 assertions)
   Duration: 3.74s
 ```
-
----
-
-## 11. Trade-offs Made & What We'd Do Differently with More Time
-
-### Trade-offs Made Under Time Pressure
-1. **Synchronous Rollup vs. Asynchronous Stream Ingestion**:
-   - *Current*: `UsageService::recordEvent()` executes the atomic daily rollup inside the same database transaction.
-   - *Trade-off*: Simpler and guarantees zero lag, but at 50,000+ req/sec, synchronous relational writes create write amplification.
-2. **Date-Aligned vs Sub-Second Boundary Segments**:
-   - *Current*: When segment boundaries cross mid-day, the system checks `usage_events` directly for that customer; for date-aligned queries, it queries `daily_usages`.
-   - *Trade-off*: Hybrid approach is clean and performs well, but pure streaming event-sourcing would track segment ID on the event itself.
-3. **Array/File Cache Fallback**:
-   - *Current*: Uses Laravel's unified cache manager (tested on array/file/Redis) with individual key invalidation. Cache tags are omitted to maintain 100% compatibility across file and database cache drivers.
-
-### What We'd Do Differently with More Time
-1. **Kafka / Redis Streams Buffer**:
-   Introduce an append-only message broker (Kafka or Redis Streams) in front of the database. The `POST /usage` endpoint would push to the stream and respond in `< 3 ms`. A daemon worker group would consume in micro-batches (e.g. 2,000 events/batch) and flush to MySQL.
-2. **ClickHouse Cold-Storage Tiering**:
-   Move raw `usage_events` older than 90 days to a columnar store like ClickHouse or AWS S3 + Parquet, keeping the operational MySQL database under 20 GB forever.
-3. **Webhook Notifications**:
-   Dispatch webhook notifications when a customer reaches 80%, 90%, and 100% of their included allowance, or when an invoice is issued.
-
----
 
 ## 12. API Reference & cURL Examples
 
